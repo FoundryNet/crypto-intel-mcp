@@ -1,0 +1,3 @@
+fastmcp>=2.0
+httpx>=0.27
+# x402 gating is plain Solana JSON-RPC over httpx — no x402[svm]/solders extra.
