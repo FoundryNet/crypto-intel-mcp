@@ -1,0 +1,46 @@
+name: "@foundrynet/crypto-intel-mcp"
+displayName: "FoundryNet Crypto Intelligence"
+description: >-
+  Real-time crypto prices, DeFi TVL and protocol data, whale transfer alerts, market anomaly detection, and Fear & Greed index tracking.
+icon: "₿"
+homepage: "https://foundrynet.io"
+repository: "https://github.com/FoundryNet/crypto-intel-mcp"
+license: "MIT"
+categories:
+  - finance
+  - crypto
+  - data
+tags:
+  - crypto-prices
+  - defi
+  - bitcoin
+  - ethereum
+  - whale-alerts
+  - market-data
+  - coingecko
+keywords:
+  - crypto-prices
+  - defi
+  - bitcoin
+  - ethereum
+  - whale-alerts
+  - market-data
+  - coingecko
+attestation:
+  protocol: "MINT Protocol"
+  verified_outputs: true
+  live_feed: "https://mint.foundrynet.io/feed"
+network:
+  name: "FoundryNet Data Network"
+  servers: 17
+startCommand:
+  type: http
+  url: "https://crypto-intel-mcp-production.up.railway.app/mcp"
+  transport: streamable-http
+  configSchema:
+    type: object
+    properties:
+      api_key:
+        type: string
+        title: "Forge billing key (optional)"
+        description: "fnet_ key to bypass the per-query x402 paywall and bill to a Forge account."
