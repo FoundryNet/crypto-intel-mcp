@@ -6,6 +6,7 @@
   whale_alerts     ($0.01)   volume-derived notable flows / turnover signals
   defi_overview    ($0.01)   DeFi TVL by protocol/category (DeFiLlama)
   anomaly_scan     ($0.02)   unusual volume, large moves, MA divergence (attested)
+  token_risk_scan  ($0.02)   DeFi risk score: cap, liquidity, volatility, sentiment (attested)
   daily_brief      ($15)     curated daily crypto movers brief
   mint_info        (free)    FoundryNet Data Network + MINT cross-promo
 """
@@ -15,7 +16,9 @@ from . import price_history as price_history_tool
 from . import whale_alerts as whale_alerts_tool
 from . import defi_overview as defi_overview_tool
 from . import anomaly_scan as anomaly_scan_tool
+from . import token_risk as token_risk_tool
 from . import daily_brief as daily_brief_tool
+from . import brief_summary as brief_summary_tool
 from . import mint as mint_tool
 
 
@@ -26,5 +29,7 @@ def register_all(mcp) -> None:
     whale_alerts_tool.register(mcp)
     defi_overview_tool.register(mcp)
     anomaly_scan_tool.register(mcp)
+    token_risk_tool.register(mcp)
     daily_brief_tool.register(mcp)
+    brief_summary_tool.register(mcp)
     mint_tool.register(mcp)

@@ -1,7 +1,7 @@
 name: "@foundrynet/crypto-intel-mcp"
 displayName: "FoundryNet Crypto Intelligence"
 description: >-
-  Real-time crypto prices, DeFi TVL and protocol data, whale transfer alerts, market anomaly detection, and Fear & Greed index tracking.
+  DeFi and crypto risk scanning — score any token for market cap risk, liquidity concerns, volatility flags, and market sentiment. Also provides real-time prices, DeFi TVL, whale alerts, market anomaly detection, and Fear & Greed index tracking.
 icon: "₿"
 homepage: "https://foundrynet.io"
 repository: "https://github.com/FoundryNet/crypto-intel-mcp"
@@ -18,6 +18,11 @@ tags:
   - whale-alerts
   - market-data
   - coingecko
+  - defi-risk
+  - token-analysis
+  - crypto-risk-score
+  - rug-pull-detection
+  - token-safety
 keywords:
   - crypto-prices
   - defi
@@ -26,6 +31,11 @@ keywords:
   - whale-alerts
   - market-data
   - coingecko
+  - defi-risk
+  - token-analysis
+  - crypto-risk-score
+  - rug-pull-detection
+  - token-safety
 attestation:
   protocol: "MINT Protocol"
   verified_outputs: true

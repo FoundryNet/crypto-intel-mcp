@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.FoundryNet/crypto-intel-mcp",
   "title": "Crypto Market Intelligence MCP",
-  "description": "Crypto prices, market overview, DeFi TVL, whale flows & anomaly scans for trading agents.",
+  "description": "DeFi and crypto risk scanning — score any token for market cap risk, liquidity concerns, volatility flags, and market sentiment. Also provides real-time prices, DeFi TVL, whale flows & anomaly scans for trading agents.",
   "version": "1.0.0",
   "homepage": "https://foundrynet.io",
   "keywords": [
@@ -10,14 +10,24 @@
     "bitcoin",
     "defi",
     "price",
-    "anomaly detection"
+    "anomaly detection",
+    "defi-risk",
+    "token-analysis",
+    "crypto-risk-score",
+    "rug-pull-detection",
+    "token-safety"
   ],
   "tags": [
     "crypto",
     "bitcoin",
     "defi",
     "price",
-    "anomaly detection"
+    "anomaly detection",
+    "defi-risk",
+    "token-analysis",
+    "crypto-risk-score",
+    "rug-pull-detection",
+    "token-safety"
   ],
   "categories": [
     "finance",

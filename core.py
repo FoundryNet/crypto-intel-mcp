@@ -18,6 +18,7 @@ import crypto_sources as src
 import daily_curator
 import mint_integration
 import payment_gate
+import stripe_gate
 import supa
 
 logger = logging.getLogger("cry.core")
@@ -361,13 +362,136 @@ async def do_anomaly_scan(coin, *, agent_key, payment_tx=None, api_key=None) -> 
     return result
 
 
+# ── token_risk_scan (PAID) — DeFi Risk Scanner ───────────────────────────────
+async def do_token_risk_scan(coin, *, agent_key, payment_tx=None, api_key=None) -> dict:
+    """Combine the free price + market_overview reads into a 0-100 token risk
+    score (market-cap, liquidity, volatility, sentiment) with flags + a verdict."""
+    coin = (coin or "").strip()
+    if not coin:
+        return {"error": "bad_request", "detail": "coin (id like 'bitcoin') or symbol (like 'BTC') is required"}
+    decision = await payment_gate.precheck("token_risk_scan", {"coin": coin},
+                                           config.PRICE_TOKEN_RISK, agent_key, payment_tx, api_key)
+    if decision["gate"] == "blocked":
+        return decision["body"]
+
+    price_data = await do_price(coin)
+    if not isinstance(price_data, dict) or price_data.get("price_usd") is None or "error" in price_data:
+        return {"error": f"Token {coin} not found", "risk_score": None,
+                "billing": _billing(decision)}
+
+    price_usd = price_data.get("price_usd")
+    market_cap = price_data.get("market_cap")
+    volume_24h = price_data.get("volume_24h")
+    change_24h = price_data.get("change_24h_pct")
+
+    overview = await do_market_overview()
+    fg = (overview or {}).get("fear_greed_index") if isinstance(overview, dict) else None
+    fg_value = fg.get("value") if isinstance(fg, dict) else None
+
+    risk_score = 0
+    risk_flags: list = []
+
+    # Market-cap risk (smaller cap → riskier).
+    if market_cap is not None:
+        if market_cap < 1_000_000:
+            risk_score += 35
+            risk_flags.append("micro_cap_under_1M")
+        elif market_cap < 10_000_000:
+            risk_score += 20
+            risk_flags.append("small_cap_under_10M")
+        elif market_cap < 100_000_000:
+            risk_score += 10
+            risk_flags.append("mid_cap_under_100M")
+
+    # Liquidity risk (24h volume vs market cap).
+    if market_cap and volume_24h is not None and market_cap > 0:
+        liquidity = volume_24h / market_cap
+        if liquidity < 0.01:
+            risk_score += 25
+            risk_flags.append("very_low_liquidity")
+        elif liquidity < 0.05:
+            risk_score += 10
+            risk_flags.append("low_liquidity")
+
+    # Volatility risk (absolute 24h move).
+    if change_24h is not None:
+        ac = abs(change_24h)
+        if ac > 20:
+            risk_score += 25
+            risk_flags.append(f"extreme_volatility_{round(ac, 1)}")
+        elif ac > 10:
+            risk_score += 15
+            risk_flags.append(f"high_volatility_{round(ac, 1)}")
+
+    # Market sentiment (extreme fear).
+    if fg_value is not None:
+        try:
+            if int(fg_value) < 25:
+                risk_score += 10
+                risk_flags.append("extreme_fear_market")
+        except (TypeError, ValueError):
+            pass
+
+    risk_score = min(risk_score, 100)
+    if risk_score > 70:
+        risk_level = "critical"
+        recommendation = "Extreme risk — do not invest without thorough due diligence"
+    elif risk_score > 50:
+        risk_level = "high"
+        recommendation = "High risk — significant volatility or liquidity concerns"
+    elif risk_score > 30:
+        risk_level = "moderate"
+        recommendation = "Moderate risk — standard caution advised"
+    else:
+        risk_level = "low"
+        recommendation = "Lower risk — established token with reasonable metrics"
+
+    out = {
+        "token": price_data.get("coin") or coin,
+        "risk_score": risk_score,
+        "risk_level": risk_level,
+        "price_usd": price_usd,
+        "market_cap": market_cap,
+        "volume_24h": volume_24h,
+        "change_24h_pct": change_24h,
+        "risk_flags": risk_flags,
+        "recommendation": recommendation,
+        "billing": _billing(decision),
+    }
+    out["provenance"] = await asyncio.to_thread(
+        mint_integration.attest_data,
+        {"token": out["token"], "risk_score": risk_score, "risk_level": risk_level,
+         "risk_flags": risk_flags},
+        "analysis", "token risk scan")
+    return out
+
+
 # ── daily_brief (premium, curated) ────────────────────────────────────────────
-async def do_daily_brief(date, *, agent_key, payment_tx=None, api_key=None) -> dict:
+async def do_daily_brief(date, *, agent_key, payment_tx=None, api_key=None,
+                         stripe_token=None) -> dict:
     day = (date or _today()).strip()
+
+    # Stripe rail (parallel to x402): a paid Checkout Session unlocks the brief.
+    stripe_err = None
+    if stripe_token and stripe_gate.is_active():
+        sv = await stripe_gate.verify_session(stripe_token, config.PRICE_DAILY_BRIEF,
+                                              tool="daily_brief", agent_key=agent_key)
+        if sv["ok"]:
+            brief = await daily_curator.get_brief(day)
+            if not brief:
+                return {"error": "not_available",
+                        "detail": f"No brief for {day} (not yet generated, or expired at midnight UTC). "
+                                  f"Briefs are curated daily at {config.BRIEF_HOUR_UTC:02d}:00 UTC.",
+                        "billing": "stripe"}
+            await daily_curator.bump_purchase(day)
+            return {**brief, "billing": "stripe", "stripe_session": sv["session"]}
+        stripe_err = sv.get("detail")  # surface on the 402 below
+
     decision = await payment_gate.precheck("daily_brief", {"date": day},
                                            config.PRICE_DAILY_BRIEF, agent_key, payment_tx, api_key)
     if decision["gate"] == "blocked":
-        return decision["body"]
+        return stripe_gate.augment_402(decision["body"], config.PRICE_DAILY_BRIEF,
+                                       stripe_error=stripe_err)
     brief = await daily_curator.get_brief(day)
     if not brief:
         return {"error": "not_available",
@@ -440,8 +564,11 @@ def _make_upsell(_fn):
             except Exception:  # noqa: BLE001
                 pass
             try:
-                import asyncio as _aio, mint_integration as _mint
-                result["foundrynet_network"] = await _aio.to_thread(_mint.network_heartbeat)
+                import asyncio as _aio, mint_integration as _mint, upsell_engine as _upsell_engine
+                _hb = await _aio.to_thread(_mint.network_heartbeat)
+                _av, _ct = await _brief_status_cached()
+                result["foundrynet_network"] = {**_hb, **_upsell_engine.get_upsell(
+                    brief_price=config.PRICE_DAILY_BRIEF, brief_signal_count=(_ct if _av else None))}
             except Exception:  # noqa: BLE001
                 pass
         return result
@@ -449,6 +576,52 @@ def _make_upsell(_fn):
     return _wrapped
 
 
-for _upsell_fn in ("do_price_history", "do_whale_alerts", "do_defi_overview", "do_anomaly_scan"):
+for _upsell_fn in ("do_price_history", "do_whale_alerts", "do_defi_overview", "do_anomaly_scan",
+                   "do_token_risk_scan"):
     if _upsell_fn in globals():
         globals()[_upsell_fn] = _make_upsell(globals()[_upsell_fn])
+
+
+
+# ── brief_summary ($0.50): structured top-5 sample of today's brief (upsell) ──
+def _top_signals(brief: dict, n: int = 5) -> list:
+    """Flatten a brief's signals into a flat top-N list — structure-agnostic
+    (works whether `signals` is a dict-of-categories or a flat list)."""
+    sig = (brief or {}).get("signals")
+    items: list = []
+    if isinstance(sig, dict):
+        for cat, val in sig.items():
+            if isinstance(val, list):
+                for it in val:
+                    items.append({"category": cat, **(it if isinstance(it, dict) else {"value": it})})
+            elif isinstance(val, dict):
+                items.append({"category": cat, **val})
+            elif val not in (None, "", 0):
+                items.append({"category": cat, "value": val})
+    elif isinstance(sig, list):
+        items = sig
+    return items[:n]
+
+
+async def do_brief_summary(date, *, agent_key, payment_tx=None, api_key=None):
+    """Top-5 signals from today's brief as structured JSON (no prose) — the $0.50
+    sample that upsells the full daily_brief."""
+    from datetime import datetime, timezone
+    day = (date or datetime.now(timezone.utc).strftime("%Y-%m-%d")).strip()
+    dec = await payment_gate.precheck("brief_summary", {"date": day}, config.PRICE_BRIEF_SUMMARY,
+                                      agent_key, payment_tx, api_key)
+    if dec["gate"] == "blocked":
+        return dec["body"]
+    brief = await daily_curator.get_brief(day)
+    if not brief:
+        return {"error": "not_available",
+                "detail": f"No brief for {day} yet (curated daily; expires next midnight UTC).",
+                "billing": _billing(dec)}
+    return {
+        "date": day,
+        "top_signals": _top_signals(brief, 5),
+        "total_signals": brief.get("signal_count"),
+        "full_brief": {"tool": "daily_brief", "price_usd": config.PRICE_DAILY_BRIEF,
+                       "note": "Full brief returns all signals with complete detail + MINT attestation."},
+        "billing": _billing(dec),
+    }

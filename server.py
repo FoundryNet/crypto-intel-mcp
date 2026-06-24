@@ -36,6 +36,7 @@ import crypto_aggregator as agg
 import daily_curator
 import identity
 import payment_gate
+import x402_standard
 import supa
 import tools
 
@@ -66,7 +67,8 @@ async def health(request: Request) -> JSONResponse:
         "status": "ok", "service": "crypto-intel-mcp", "transport": "streamable-http",
         "network": "FoundryNet Data Network",
         "tools": ["price", "market_overview", "price_history", "whale_alerts",
-                  "defi_overview", "anomaly_scan", "daily_brief", "mint_info"],
+                  "defi_overview", "anomaly_scan", "token_risk_scan", "daily_brief",
+                  "mint_info"],
         "dataset": "supabase:crypto_prices" if supa.configured() else "unconfigured",
         "data_source": "CoinGecko + DeFiLlama + alternative.me (Fear & Greed)",
         "agg_interval_minutes": config.AGG_INTERVAL_MINUTES,
@@ -77,6 +79,7 @@ async def health(request: Request) -> JSONResponse:
                         "whale_alerts": config.PRICE_WHALE_ALERTS,
                         "defi_overview": config.PRICE_DEFI_OVERVIEW,
                         "anomaly_scan": config.PRICE_ANOMALY_SCAN,
+                        "token_risk_scan": config.PRICE_TOKEN_RISK,
                         "daily_brief": config.PRICE_DAILY_BRIEF},
         "free_tier_daily": config.FREE_TIER_DAILY,
         "payment_recipient": config.PAYMENT_RECIPIENT,
@@ -166,6 +169,15 @@ async def rest_anomaly_scan(request: Request) -> JSONResponse:
                                             api_key=identity.bearer(request)))
 
 
+@mcp.custom_route("/v1/token-risk-scan", methods=["POST"])
+async def rest_token_risk_scan(request: Request) -> JSONResponse:
+    b = await _json_body(request)
+    return _resp(await core.do_token_risk_scan(_coin(b, request.query_params),
+                                               agent_key=_akey(request, b),
+                                               payment_tx=b.get("payment_tx"),
+                                               api_key=identity.bearer(request)))
+
+
 @mcp.custom_route("/v1/daily-brief", methods=["POST"])
 async def rest_daily_brief(request: Request) -> JSONResponse:
     b = await _json_body(request)
@@ -182,20 +194,20 @@ async def rest_mint(request: Request) -> JSONResponse:
 # ── Discovery ────────────────────────────────────────────────────────────────
 _AGENT_CARD = {
     "name": "Crypto Market Intelligence MCP",
-    "description": ("Query crypto prices and market sentiment — free price and market "
-                    "overview, plus paid history, DeFi TVL, volume-derived whale flows "
-                    "and anomaly scans from CoinGecko + DeFiLlama."),
+    "description": ("DeFi and crypto risk scanning — score any token for market cap "
+                    "risk, liquidity concerns, volatility flags, and market sentiment. "
+                    "Also provides real-time prices, DeFi TVL, and whale alerts."),
     "url": config.PUBLIC_MCP_URL,
     "version": "1.0.0",
     "capabilities": {"tools": ["price", "market_overview", "price_history",
                                "whale_alerts", "defi_overview", "anomaly_scan",
-                               "daily_brief", "mint_info"]},
+                               "token_risk_scan", "daily_brief", "mint_info"]},
     "provider": {"name": "FoundryNet", "url": "https://foundrynet.io"},
     "network": "FoundryNet Data Network",
     "attestation": {"protocol": "MINT Protocol",
                     "endpoint": "https://mint-mcp-production.up.railway.app/mcp",
                     "verified_outputs": True, "live_feed": "https://mint.foundrynet.io/feed", "feed_api": "https://mint-mcp-production.up.railway.app/v1/feed"},
-    "protocols": {"mcp": {"endpoint": config.PUBLIC_MCP_URL, "transport": "streamable-http", "tools_count": 8},
+    "protocols": {"mcp": {"endpoint": config.PUBLIC_MCP_URL, "transport": "streamable-http", "tools_count": 9},
                   "x402": {"supported": True, "currency": "USDC", "network": "solana"}},
     "contact": "hello@foundrynet.io",
 }
@@ -233,16 +245,19 @@ async def server_card(request: Request) -> JSONResponse:
                                            "anomaly_scan give 50 free queries/day then take an "
                                            "fnet_ Bearer key OR x402 USDC.")},
         "tools": live, "version": "1.0", "name": "Crypto Market Intelligence MCP",
-        "tagline": "Free crypto prices + paid history, DeFi TVL & anomaly scans for agents.",
-        "description": ("Crypto market intelligence: free price + market overview, plus paid "
-                        "price history, DeFi TVL, volume-derived whale flows and anomaly scans. "
-                        "CoinGecko + DeFiLlama + Fear & Greed, refreshed every 15 minutes. The "
-                        "free price gateway every trading agent needs."),
+        "tagline": "DeFi token risk scoring + free crypto prices, DeFi TVL & anomaly scans for agents.",
+        "description": ("DeFi and crypto risk scanning — score any token for market cap risk, "
+                        "liquidity concerns, volatility flags, and market sentiment. Also provides "
+                        "real-time prices, DeFi TVL, and whale alerts. CoinGecko + DeFiLlama + "
+                        "Fear & Greed, refreshed every 15 minutes. The free price gateway every "
+                        "trading agent needs."),
         "serverUrl": config.PUBLIC_MCP_URL, "transport": "streamable-http",
         "tools_count": len(live),
         "categories": ["finance", "crypto", "data", "defi", "trading"],
         "keywords": ["crypto", "bitcoin", "ethereum", "defi", "price", "market cap",
-                     "whale alerts", "fear and greed", "anomaly detection"],
+                     "whale alerts", "fear and greed", "anomaly detection",
+                     "defi-risk", "token-analysis", "crypto-risk-score",
+                     "rug-pull-detection", "token-safety"],
         "network": "FoundryNet Data Network", "see_also": config.SISTER_SERVERS,
         "pricing": {"model": "metered",
                     "free_tier": "price + market_overview are free; 50 paid queries/day per agent",
@@ -272,6 +287,47 @@ async def wellknown_mcp_json(request: Request) -> JSONResponse:
         "network": {"name": "FoundryNet Data Network", "servers": 17,
                     "homepage": "https://foundrynet.io"},
     }, headers={"Cache-Control": "public, max-age=300"})
+
+
+
+# ── Standard x402 compliance (discoverable on x402scan / 402 Index / CDP Bazaar) ──
+@mcp.custom_route("/x402", methods=["GET"])
+async def x402_index(request: Request) -> JSONResponse:
+    return JSONResponse(x402_standard.index(),
+                        headers={"Cache-Control": "public, max-age=300",
+                                 "Access-Control-Allow-Origin": "*"})
+
+
+@mcp.custom_route("/.well-known/x402", methods=["GET"])
+async def x402_wellknown(request: Request) -> JSONResponse:
+    return JSONResponse(x402_standard.index(),
+                        headers={"Cache-Control": "public, max-age=300",
+                                 "Access-Control-Allow-Origin": "*"})
+
+
+@mcp.custom_route("/x402/{tool}", methods=["GET", "POST"])
+async def x402_resource(request: Request) -> JSONResponse:
+    tool = request.path_params["tool"]
+    if tool not in x402_standard.PAID_TOOLS:
+        return JSONResponse({"error": "unknown_resource", "tool": tool,
+                             "available": list(x402_standard.PAID_TOOLS)}, status_code=404)
+    challenge = x402_standard.payment_required_header(tool)
+    return JSONResponse(x402_standard.payment_required(tool), status_code=402,
+                        headers={"Cache-Control": "public, max-age=300",
+                                 "Access-Control-Allow-Origin": "*",
+                                 "PAYMENT-REQUIRED": challenge,
+                                 "X-PAYMENT": challenge,
+                                 "Link": '</openapi.json>; rel="describedby"',
+                                 "WWW-Authenticate": 'x402 version="2"'})
+
+
+@mcp.custom_route("/openapi.json", methods=["GET"])
+async def openapi_doc(request: Request) -> JSONResponse:
+    """OpenAPI 3.1 discovery doc — x402scan requires a spec at a discoverable URL."""
+    return JSONResponse(x402_standard.openapi(),
+                        headers={"Cache-Control": "public, max-age=300",
+                                 "Access-Control-Allow-Origin": "*",
+                                 "Link": '</openapi.json>; rel="describedby"'})
 
 
 def build_dual_app():
