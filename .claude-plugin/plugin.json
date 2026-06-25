@@ -1,0 +1,9 @@
+{
+  "name": "foundrynet-crypto-intelligence",
+  "version": "1.0.0",
+  "description": "Real-time crypto prices, market overview, DeFi metrics, and whale-movement alerts from the FoundryNet Data Network",
+  "author": { "name": "FoundryNet Labs", "url": "https://foundrynet.io" },
+  "homepage": "https://crypto-intel-mcp-production.up.railway.app/mcp",
+  "license": "MIT",
+  "keywords": ["crypto","defi","whale-alerts","bitcoin","market-data"]
+}
