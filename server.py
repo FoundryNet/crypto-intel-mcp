@@ -27,6 +27,7 @@ import inspect
 import logging
 
 from fastmcp import FastMCP
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -34,6 +35,7 @@ import config
 import core
 import crypto_aggregator as agg
 import daily_curator
+import event_log
 import identity
 import payment_gate
 import x402_standard
@@ -58,6 +60,21 @@ else:
     logger.info("pay-per-query INERT (X402 off or recipient unset) — all tools free")
 
 tools.register_all(mcp)
+
+
+# ── okf-reliability-v1: emit reliability metadata on every tool result (#2964) ──
+try:
+    from okf_middleware import ReliabilityMiddleware
+    mcp.add_middleware(ReliabilityMiddleware(server_id="crypto-intel"))
+except Exception as _okf_e:  # noqa: BLE001
+    import logging as _okf_log; _okf_log.getLogger(__name__).warning(f"okf middleware not wired: {_okf_e}")
+
+
+@mcp.custom_route("/v1/reliability", methods=["GET"])
+async def _okf_reliability_route(request):
+    from starlette.responses import JSONResponse
+    import okf_endpoint
+    return JSONResponse(okf_endpoint.reliability_payload("crypto-intel"))
 
 
 # ── Health ──────────────────────────────────────────────────────────────────
@@ -352,6 +369,9 @@ def build_dual_app():
                         with contextlib.suppress(Exception):
                             await t
     main_app.router.lifespan_context = _dual_lifespan
+    # Per-call telemetry: times every /v1/* request and fire-and-forgets it to the
+    # agents event-log ingest. Never blocks or raises into the request path.
+    main_app.add_middleware(BaseHTTPMiddleware, dispatch=event_log.middleware)
     return main_app
 
 
